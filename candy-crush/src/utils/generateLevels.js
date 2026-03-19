@@ -1,18 +1,118 @@
-// 6 candy colors with distinct visual identities
-export const CANDY_TYPES = [
-  { id: 0, color: '#FF6B6B', name: 'red' },
-  { id: 1, color: '#4ECDC4', name: 'teal' },
-  { id: 2, color: '#45B7D1', name: 'blue' },
-  { id: 3, color: '#96CEB4', name: 'green' },
-  { id: 4, color: '#FFEAA7', name: 'yellow' },
-  { id: 5, color: '#DDA0DD', name: 'purple' },
+// 6 fruit types with distinct visual identities
+export const FRUIT_TYPES = [
+  { id: 0, color: '#EF5350', name: 'apple' },
+  { id: 1, color: '#FF9800', name: 'orange' },
+  { id: 2, color: '#FDD835', name: 'banana' },
+  { id: 3, color: '#AB47BC', name: 'grape' },
+  { id: 4, color: '#66BB6A', name: 'watermelon' },
+  { id: 5, color: '#26C6DA', name: 'kiwi' },
 ];
 
 const BOARD_SIZE = 8;
 
 let nextCandyId = 1;
+let nextObstacleId = 1;
 
-export function createCandy(type, row, col, special = null) {
+export function emptyObstacles() {
+  return Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(null));
+}
+
+function createObstacle(kind, row, col, extra) {
+  return { id: nextObstacleId++, kind, row, col, ...extra };
+}
+
+function placeObstacles(rng, board, levelNum) {
+  const obstacles = emptyObstacles();
+
+  // Levels 1-15: no obstacles
+  if (levelNum <= 15) return obstacles;
+
+  // Linear obstacle scaling from level 16-100
+  const t = (levelNum - 16) / 84; // 0..1
+  let vineCount = 0, stoneCount = 0, portalCount = 0;
+
+  vineCount = 1 + Math.floor(t * 4);     // 1 → 5
+  if (levelNum >= 35) stoneCount = Math.floor((t - 0.22) * 4); // 0 → 3
+  if (levelNum >= 55) portalCount = Math.floor((t - 0.46) * 3); // 0 → 2
+
+  // Candidate positions (avoid board edges so gravity/spawning always has room)
+  const candidates = [];
+  for (let r = 1; r < BOARD_SIZE - 1; r++) {
+    for (let c = 1; c < BOARD_SIZE - 1; c++) {
+      candidates.push([r, c]);
+    }
+  }
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+
+  const usedCells = new Set();
+  let candidateIdx = 0;
+
+  // Enforce minimum spacing between obstacles so segments remain large enough
+  const nextCandidate = (minSpacing = 1) => {
+    while (candidateIdx < candidates.length) {
+      const [r, c] = candidates[candidateIdx++];
+      const key = r * BOARD_SIZE + c;
+      if (usedCells.has(key)) continue;
+      let tooClose = false;
+      for (let dr = -minSpacing; dr <= minSpacing && !tooClose; dr++) {
+        for (let dc = -minSpacing; dc <= minSpacing && !tooClose; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          tooClose = usedCells.has((r + dr) * BOARD_SIZE + (c + dc));
+        }
+      }
+      if (!tooClose) {
+        usedCells.add(key);
+        return [r, c];
+      }
+    }
+    return null;
+  };
+
+  for (let i = 0; i < vineCount; i++) {
+    const pos = nextCandidate();
+    if (!pos) break;
+    const [r, c] = pos;
+    const vineHp = levelNum >= 70 ? 3 : 2;
+    obstacles[r][c] = createObstacle('vine', r, c, { hp: vineHp });
+    board[r][c] = null;
+  }
+
+  for (let i = 0; i < stoneCount; i++) {
+    const pos = nextCandidate();
+    if (!pos) break;
+    const [r, c] = pos;
+    obstacles[r][c] = createObstacle('stone', r, c, {});
+    board[r][c] = null;
+  }
+
+  for (let i = 0; i < portalCount; i++) {
+    // Portals don't clear board cells — fruits sit on top
+    const pos1 = nextCandidate();
+    const pos2 = nextCandidate();
+    if (!pos1 || !pos2) break;
+    const [r1, c1] = pos1;
+    const [r2, c2] = pos2;
+    obstacles[r1][c1] = createObstacle('portal', r1, c1, { partnerRow: r2, partnerCol: c2 });
+    obstacles[r2][c2] = createObstacle('portal', r2, c2, { partnerRow: r1, partnerCol: c1 });
+  }
+
+  return obstacles;
+}
+
+function placeGravityOrb(board, rng) {
+  const candidates = [];
+  for (let r = 0; r < BOARD_SIZE; r++)
+    for (let c = 0; c < BOARD_SIZE; c++)
+      if (board[r][c]) candidates.push([r, c]);
+  if (candidates.length === 0) return;
+  const [r, c] = candidates[Math.floor(rng() * candidates.length)];
+  board[r][c] = { ...board[r][c], special: 'gravity-orb' };
+}
+
+export function createFruit(type, row, col, special = null) {
   return { id: nextCandyId++, type, row, col, special };
 }
 
@@ -76,19 +176,19 @@ function findMatchesOnBoard(board) {
 
 /**
  * Check if the board has at least one valid swap that produces a match.
+ * Skips null cells (obstacle positions) as they cannot be swapped.
  */
 function boardHasValidMove(board) {
   for (let row = 0; row < BOARD_SIZE; row++) {
     for (let col = 0; col < BOARD_SIZE; col++) {
-      if (col < BOARD_SIZE - 1) {
-        // Swap right
+      if (!board[row][col]) continue;
+      if (col < BOARD_SIZE - 1 && board[row][col + 1]) {
         [board[row][col], board[row][col + 1]] = [board[row][col + 1], board[row][col]];
         const has = findMatchesOnBoard(board).size > 0;
         [board[row][col], board[row][col + 1]] = [board[row][col + 1], board[row][col]];
         if (has) return true;
       }
-      if (row < BOARD_SIZE - 1) {
-        // Swap down
+      if (row < BOARD_SIZE - 1 && board[row + 1][col]) {
         [board[row][col], board[row + 1][col]] = [board[row + 1][col], board[row][col]];
         const has = findMatchesOnBoard(board).size > 0;
         [board[row][col], board[row + 1][col]] = [board[row + 1][col], board[row][col]];
@@ -119,7 +219,7 @@ function generateBoard(rng, candyTypes, maxAttempts = 20) {
           tries++;
           if (tries > 50) break;
         } while (wouldMatch(board, row, col, type));
-        board[row][col] = createCandy(type, row, col);
+        board[row][col] = createFruit(type, row, col);
       }
     }
 
@@ -139,7 +239,7 @@ function generateBoard(rng, candyTypes, maxAttempts = 20) {
         tries++;
         if (tries > 50) break;
       } while (wouldMatch(board, row, col, type));
-      board[row][col] = createCandy(type, row, col);
+      board[row][col] = createFruit(type, row, col);
     }
   }
   return board;
@@ -164,7 +264,7 @@ export function generateRandomBoard(candyTypes) {
           tries++;
           if (tries > 50) break;
         } while (wouldMatch(board, row, col, type));
-        board[row][col] = createCandy(type, row, col);
+        board[row][col] = createFruit(type, row, col);
       }
     }
 
@@ -178,17 +278,17 @@ export function generateRandomBoard(candyTypes) {
   for (let row = 0; row < BOARD_SIZE; row++) {
     for (let col = 0; col < BOARD_SIZE; col++) {
       const type = candyTypes[Math.floor(Math.random() * candyTypes.length)];
-      board[row][col] = createCandy(type, row, col);
+      board[row][col] = createFruit(type, row, col);
     }
   }
   return board;
 }
 
 /**
- * Pick a random subset of candy type indices.
+ * Pick a random subset of fruit type indices.
  * count: how many types to pick (3-6).
  */
-function pickCandySubset(rng, count) {
+function pickFruitSubset(rng, count) {
   const all = [0, 1, 2, 3, 4, 5];
   for (let i = all.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
@@ -207,12 +307,12 @@ function randRange(rng, min, max) {
 /**
  * Generate 100 levels with progressive difficulty scaling.
  *
- * Level  1-20 (Easy):     4 candy types, 30-40 moves, target  500-1500
- * Level 21-60 (Medium):   4-5 candy types, 20-30 moves, target 1000-3000
- * Level 61-100 (Hard):    5-6 candy types, 15-25 moves, target 2500-5000
+ * Levels  1-20 (Easy):   3-4 fruit types, 35-50 moves, no obstacles, target 500-1200
+ * Levels 21-60 (Medium): 4-5 fruit types, 22-35 moves, Vine Blockers only, target 1000-2800
+ * Levels 61-100 (Hard):  5-6 fruit types, 16-27 moves, Vines+Stones+Portals, target 1800-4500
  *
- * Within each tier, difficulty ramps gradually.
- * All generated boards are validated to have at least one valid move.
+ * All generated boards are validated to have at least one valid move AFTER
+ * obstacles are placed, with up to 8 retries per level before falling back.
  */
 export function generateLevels() {
   const masterSeed = Date.now();
@@ -226,46 +326,47 @@ export function generateLevels() {
     };
 
     const levelNum = i + 1;
-    let candyCount, movesMin, movesMax, scoreMin, scoreMax;
+    let fruitCount, movesMin, movesMax, scoreMin, scoreMax;
 
-    if (levelNum <= 20) {
-      // Easy — generous moves, low targets, fewer candy types
-      candyCount = 4;
-      // Gradually tighten within the tier
-      const t = (levelNum - 1) / 19; // 0..1 across tier
-      movesMin = Math.round(35 - t * 5);   // 35 → 30
-      movesMax = Math.round(40 - t * 5);   // 40 → 35
-      scoreMin = Math.round(500 + t * 400);  // 500 → 900
-      scoreMax = Math.round(1000 + t * 500); // 1000 → 1500
-    } else if (levelNum <= 60) {
-      // Medium — moderate moves and targets, 4-5 candy types
-      const t = (levelNum - 21) / 39; // 0..1 across tier
-      candyCount = t < 0.5 ? 4 : 5;
-      movesMin = Math.round(25 - t * 5);   // 25 → 20
-      movesMax = Math.round(30 - t * 5);   // 30 → 25
-      scoreMin = Math.round(1000 + t * 1000); // 1000 → 2000
-      scoreMax = Math.round(2000 + t * 1000); // 2000 → 3000
-    } else {
-      // Hard — tight moves, high targets, 5-6 candy types
-      const t = (levelNum - 61) / 39; // 0..1 across tier
-      candyCount = t < 0.5 ? 5 : 6;
-      movesMin = Math.round(20 - t * 5);   // 20 → 15
-      movesMax = Math.round(25 - t * 5);   // 25 → 20
-      scoreMin = Math.round(2500 + t * 1500); // 2500 → 4000
-      scoreMax = Math.round(3500 + t * 1500); // 3500 → 5000
-    }
+    // Linear difficulty curve across all 100 levels
+    const t = (levelNum - 1) / 99; // 0..1 across all levels
 
-    const candyTypes = pickCandySubset(rand, candyCount);
+    // Fruit types: 4 → 6 linearly
+    if (levelNum <= 15)      fruitCount = 4;
+    else if (levelNum <= 40) fruitCount = 5;
+    else                     fruitCount = 6;
+
+    // Moves: 30 → 12 linearly
+    movesMin = Math.round(30 - t * 18);  // 30 → 12
+    movesMax = movesMin + 3;
+
+    // Target score: 300 → 2000 linearly (calibrated to halved scoring)
+    scoreMin = Math.round(300 + t * 1700);   // 300 → 2000
+    scoreMax = Math.round(scoreMin * 1.15);   // +15% variance
+
+    const fruitTypes = pickFruitSubset(rand, fruitCount);
     const moves = randRange(rand, movesMin, movesMax);
     const targetScore = randRange(rand, scoreMin, scoreMax);
-    const board = generateBoard(rand, candyTypes);
+
+    // Generate board + obstacles, retrying until the post-obstacle board is solvable
+    let board, obstacles;
+    let attempts = 0;
+    do {
+      board = generateBoard(rand, fruitTypes);
+      obstacles = placeObstacles(rand, board, levelNum);
+      attempts++;
+    } while (attempts < 8 && !boardHasValidMove(board));
+
+    // Every 5th level gets a pre-placed gravity-orb as a reward
+    if (levelNum % 5 === 0) placeGravityOrb(board, rand);
 
     levels.push({
       level: levelNum,
       targetScore,
       moves,
-      candyTypes,
+      candyTypes: fruitTypes,
       board,
+      obstacles,
     });
   }
 

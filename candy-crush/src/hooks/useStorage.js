@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-const STORAGE_KEY = 'candy-crush-save';
+const STORAGE_KEY = 'gravity-orchard-save';
 
 function loadSave() {
   try {

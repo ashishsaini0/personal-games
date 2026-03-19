@@ -3,9 +3,12 @@ import StartScreen from './components/StartScreen';
 import LevelSelect from './components/LevelSelect';
 import GameBoard from './components/GameBoard';
 import LevelHeader from './components/LevelHeader';
+import ComboNotification from './components/ComboNotification';
+import FusionNotification from './components/FusionNotification';
 import { useGameLogic } from './hooks/useGameLogic';
 import { useSound } from './hooks/useSound';
 import { useStorage } from './hooks/useStorage';
+import { useHaptics } from './hooks/useHaptics';
 import { generateLevels } from './utils/generateLevels';
 import './styles/game.css';
 
@@ -20,29 +23,35 @@ export default function App() {
   } = useStorage();
 
   const { playSwap, playMatch, playLevelComplete, playFail, playLightning } = useSound(soundEnabled);
+  const { hapticLight, hapticMatch, hapticSuccess, hapticFail, hapticPowerUp } = useHaptics();
 
   const onLevelComplete = useCallback(() => {
     playLevelComplete();
-  }, [playLevelComplete]);
+    hapticSuccess();
+  }, [playLevelComplete, hapticSuccess]);
 
   const onFail = useCallback(() => {
     playFail();
-  }, [playFail]);
+    hapticFail();
+  }, [playFail, hapticFail]);
 
   const soundCallbacks = useMemo(
     () => ({
-      onSwap: playSwap,
-      onMatch: playMatch,
+      onSwap:          () => { playSwap();      hapticLight();   },
+      onMatch:         () => { playMatch();     hapticMatch();   },
       onLevelComplete,
       onFail,
-      onLightning: playLightning,
+      onLightning:     () => { playLightning(); hapticPowerUp(); },
     }),
-    [playSwap, playMatch, onLevelComplete, onFail, playLightning]
+    [playSwap, playMatch, onLevelComplete, onFail, playLightning,
+     hapticLight, hapticMatch, hapticPowerUp]
   );
 
   const {
-    board, score, movesLeft, gameState, currentLevel,
+    board, obstacles, score, movesLeft, gameState, currentLevel,
     selectedCandy, animatingCells, shakeCell, lightningEffect, paused, targetScore,
+    gravityDir, movesUntilShift, gravityShifting, comboNotification, fusionNotification,
+    swappingCells,
     handleCandyClick, handleDragSwap, nextLevel, retryLevel,
     goToLevel, togglePause,
   } = useGameLogic(levels, soundCallbacks, startLevel);
@@ -118,7 +127,7 @@ export default function App() {
         <button className="btn-icon" onClick={handleBackToStart} title="Menu">
           &#9776;
         </button>
-        <h1 className="game-title">FRUIT CRUSH</h1>
+        <h1 className="game-title">GRAVITY ORCHARD</h1>
         <button className="btn-icon" onClick={togglePause} title={paused ? 'Resume' : 'Pause'}>
           {paused ? '\u25B6' : '\u2759\u2759'}
         </button>
@@ -136,17 +145,27 @@ export default function App() {
         score={score}
         targetScore={targetScore}
         movesLeft={movesLeft}
+        gravityDir={gravityDir}
+        movesUntilShift={movesUntilShift}
+        gravityShifting={gravityShifting}
       />
 
-      <GameBoard
-        board={board}
-        selectedCandy={selectedCandy}
-        animatingCells={animatingCells}
-        shakeCell={shakeCell}
-        lightningEffect={lightningEffect}
-        onCandyClick={handleCandyClick}
-        onDragSwap={handleDragSwap}
-      />
+      <div className="board-wrapper">
+        <GameBoard
+          board={board}
+          obstacles={obstacles}
+          selectedCandy={selectedCandy}
+          animatingCells={animatingCells}
+          swappingCells={swappingCells}
+          shakeCell={shakeCell}
+          lightningEffect={lightningEffect}
+          gravityShifting={gravityShifting}
+          onCandyClick={handleCandyClick}
+          onDragSwap={handleDragSwap}
+        />
+        <ComboNotification notification={comboNotification} />
+        <FusionNotification notification={fusionNotification} />
+      </div>
 
       {paused && gameState === 'playing' && (
         <div className="overlay">
@@ -169,18 +188,18 @@ export default function App() {
         <div className="overlay">
           <div className="overlay-card">
             <div className="overlay-icon">&#9733;</div>
-            <div className="overlay-title win">Level Complete!</div>
+            <div className="overlay-title win">Harvest Complete!</div>
             <div className="overlay-score">
               {score} / {targetScore}
             </div>
-            <div className="overlay-total">Total: {totalScore}</div>
+            <div className="overlay-total">Total Harvest Energy: {totalScore}</div>
             <div className="overlay-buttons">
               {currentLevel < 99 ? (
                 <button className="btn btn-primary" onClick={handleNextLevel}>
                   Next Level
                 </button>
               ) : (
-                <div className="overlay-title win">All 100 levels cleared!</div>
+                <div className="overlay-title win">All 100 orchards harvested!</div>
               )}
               <button className="btn btn-secondary" onClick={handleBackToStart}>
                 Menu
@@ -194,11 +213,11 @@ export default function App() {
         <div className="overlay">
           <div className="overlay-card">
             <div className="overlay-icon">&#10060;</div>
-            <div className="overlay-title lose">Level Failed</div>
+            <div className="overlay-title lose">Harvest Failed</div>
             <div className="overlay-score">
               {score} / {targetScore}
             </div>
-            <div className="overlay-total">Total: {totalScore}</div>
+            <div className="overlay-total">Total Harvest Energy: {totalScore}</div>
             <div className="overlay-buttons">
               <button className="btn btn-primary" onClick={handleRetry}>
                 Try Again

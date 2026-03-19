@@ -5,7 +5,7 @@ function LevelSelect({ highestLevel, levelScores, levels, onSelectLevel, onBack 
     <div className="level-select-screen">
       <div className="level-select-header">
         <button className="btn-back" onClick={onBack}>&#8592;</button>
-        <h2 className="level-select-title">Select Level</h2>
+        <h2 className="level-select-title">Select Orchard</h2>
       </div>
       <div className="level-grid">
         {levels.map((level, i) => {
